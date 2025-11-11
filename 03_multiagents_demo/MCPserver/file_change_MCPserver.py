@@ -1,9 +1,12 @@
 import os
 
+from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from pathlib import Path
 
 mcp = FastMCP("File_manager")
+
+load_dotenv()
 
 @mcp.tool()
 async def create_file(filename:str="default_text.txt", content:str="") -> str:

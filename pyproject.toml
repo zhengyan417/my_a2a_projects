@@ -1,0 +1,19 @@
+[project]
+name = "mya2aprojects"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "a2a-sdk[http-server]>=0.3.10",
+    "asyncclick>=8.3.0.7",
+    "dotenv>=0.9.9",
+    "google-adk>=1.17.0",
+    "langchain>=1.0.3",
+    "langchain-mcp-adapters>=0.1.12",
+    "langchain-openai>=1.0.1",
+    "litellm>=1.79.1",
+    "nest-asyncio>=1.6.0",
+    "timestamp>=0.0.1",
+    "uvicorn>=0.38.0",
+]

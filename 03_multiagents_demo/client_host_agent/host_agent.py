@@ -198,7 +198,6 @@ Current agent: {current_agent['active_agent']}
         client = self.remote_agent_connections[agent_name]
         if not client:
             raise ValueError(f'Client not available for {agent_name}')
-        # task_id永远都是同一个
         task_id = state.get('task_id', None)
         context_id = state.get('context_id', None)
         message_id = state.get('message_id', None)

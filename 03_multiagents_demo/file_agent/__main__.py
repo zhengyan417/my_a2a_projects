@@ -23,15 +23,16 @@ def main(host="localhost", port=10000):
     change_file_skill = AgentSkill(
         id='change_file',
         name='文件操作工具',
-        description='在指定路径增加指定名字的文件或者删除指定名字的文件',
+        description='对文件进行增删改查,以及查询文件夹目前有的文件',
         tags=['file', 'create file', 'delete file'],
         examples=[r'帮我创建一个叫test1.txt的文件, 里面写上1234',
-                  r'帮我删除一个叫test1.txt的文件',]
+                  r'帮我删除一个叫test1.txt的文件',
+                  r'帮我查询这个文件夹目前的内容']
     )
     # 2. 定义AgentCard
     agent_card = AgentCard(
         name='File Agent',
-        description='帮助进行文件的创建或者删除',
+        description='帮助进行文件的增删改查',
         url=f'http://{host}:{port}/',
         version='1.0.0',
         default_input_modes=FileAgent.SUPPORTED_CONTENT_TYPES,

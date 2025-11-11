@@ -23,12 +23,12 @@ python file_agent/__main__.py --port 10001
 ```
 
 - A2Aclient  
-  - 若选择client_host_agent  
+- 若选择client_host_agent  
 ```bash
 cd 03_multiagents_demo   
 adk web --port 8030
-```
-  - 若选择host_agent_adk  
+```  
+- 若选择host_agent_adk  
 ```bash
 cd 03_multiagents_demo/host_agent_adk   
 adk web --port 8030

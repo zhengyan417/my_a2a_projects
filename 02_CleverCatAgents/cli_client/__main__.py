@@ -193,6 +193,7 @@ async def completeTask(
         ),
     )
 
+    # 配置推送系统
     if use_push_notifications:
         payload['pushNotification'] = {
             'url': f'http://{notification_receiver_host}:{notification_receiver_port}/notify',
@@ -294,6 +295,7 @@ async def completeTask(
         state = TaskState(taskResult.status.state)
         if state.name == TaskState.input_required.name:
             return (
+                # 递归调用
                 await completeTask(
                     client,
                     streaming,

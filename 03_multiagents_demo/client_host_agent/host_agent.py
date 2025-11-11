@@ -97,7 +97,6 @@ class HostAgent:
         for ra in self.list_remote_agents():
             agent_info.append(json.dumps(ra))
         self.agents = '\n'.join(agent_info)
-
     # 创建client agent
     def create_agent(self) -> Agent:
         return Agent(
@@ -245,11 +244,12 @@ Current agent: {current_agent['active_agent']}
         elif task.status.state == TaskState.canceled:
             # Open question, should we return some info for cancellation instead
             return f"任务取消,请稍后再试"
-            # raise ValueError(f'Agent {agent_name} task {task.id} is cancelled')
+            # raise ValueError(f'Agent {agent_name} task {task.id} is canceled')
         elif task.status.state == TaskState.failed:
             # Raise error for failure
             raise ValueError(f'Agent {agent_name} task {task.id} failed')
         response = []
+        state['task_id'] = None
         if task.status.message:
             # Assume the information is in the task message.
 

@@ -9,8 +9,8 @@
 # 运行指令
 **请先配置好虚拟环境和.env**  
 
-这个项目我准备了两个client，可以自行选择运行哪个client。
 
+### 在四个终端中依次运行以下指令
 - MCPserver  
 ```bash
 cd 03_multiagents_demo   

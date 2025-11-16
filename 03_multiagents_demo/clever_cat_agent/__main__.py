@@ -26,7 +26,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def main(host:str="localhost", port:int=10001):
+def main(host:str="localhost", port:int=10000):
     """启动CleverAgent Server"""
     # 1. 定义AgentSkill
     decode_skill = AgentSkill(

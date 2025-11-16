@@ -11,34 +11,31 @@
 **请先配置好虚拟环境和.env**  
 
 
-### 在五个终端中依次运行以下指令
-- MCPserver  
+### 在五个终端中依次进行以下操作和运行以下指令
+#### MCPserver  
 ```bash
-cd 03_multiagents_demo   
-python MCPserver/file_change_MCPserver.py
+python 03_multiagents_demo/MCPserver/file_change_MCPserver.py
 ```
 
-- A2Aserver-1  
+#### A2Aserver-1  
 ```bash
-cd 03_multiagents_demo   
-python clever_cat_agent/__main__.py --port 10000
+python 03_multiagents_demo/clever_cat_agent/__main__.py --port 10000
 ```
 
-- A2Aserver-2
+#### A2Aserver-2
 ```bash
-cd 03_multiagents_demo   
-python file_agent/__main__.py --port 10001
+python 03_multiagents_demo/file_agent/__main__.py --port 10001
 ```
 
-- A2Aserver-3(**目前该server存在bug，在没有修复前不建议运行**)
+#### A2Aserver-3(**目前该server存在bug，在没有修复前不建议运行**)
 ```bash
-cd 03_multiagents_demo
-python search_agent/__main__.py --port 10002
+python 03_multiagents_demo/search_agent/__main__.py --port 10002
 ```
 
-- A2Aclient   
+#### A2Aclient   
+- **修改03_multiagents_demo/a2a_client/client_host_agent/agent.py里已经启动的远程的a2a_server**
 ```bash
-cd 03_multiagents_demo   
+cd 03_multiagents_demo/a2a_client    
 adk web --port 8030
 ```
 
@@ -46,7 +43,7 @@ adk web --port 8030
 - 这个智能体系统有什么功能？
 - 目前文件夹里面有什么文件？
 - 帮我查询init_file.txt里面的内容，注意要先把内容解密，不要直接给我密文
-- 帮我创建一个叫test1.txt的文本文件，里面写上i like using a2a protocol,最后一行再加上当前时间，并且将处理时间以外的所有内容进行加密。
+- 帮我创建一个叫test1.txt的文本文件，里面写上i like using a2a protocol,并且将所有内容进行加密。
 - 明文是beiyouBUPT,帮我加密。
 - 帮我创建一个叫test3,txt的文本文件，里面写上YiTianLearningCosmos的加密后的字符串，以确保文件的安全性。
 - 帮我创建一个叫test4.txt的文本文件，里面写上加密后的字符串：

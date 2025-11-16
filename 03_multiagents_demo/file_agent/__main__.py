@@ -17,7 +17,7 @@ from agent_executor import FileAgentExecutor
 
 load_dotenv()
 
-def main(host="localhost", port=10000):
+def main(host="localhost", port=10001):
     """启动CleverAgent Server"""
     # 1. 定义AgentSkill
     change_file_skill = AgentSkill(

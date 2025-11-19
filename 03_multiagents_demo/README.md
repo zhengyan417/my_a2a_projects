@@ -27,7 +27,7 @@ python 03_multiagents_demo/clever_cat_agent/__main__.py --port 10000
 python 03_multiagents_demo/file_agent/__main__.py --port 10001
 ```
 
-#### A2Aserver-3(**目前该server存在bug，在没有修复前不建议运行**)
+#### A2Aserver-3
 ```bash
 python 03_multiagents_demo/search_agent/__main__.py --port 10002
 ```

@@ -31,7 +31,7 @@ def encode(s: str)->str:
         key_char = key[i%len(key)]
         result += chr(ord(char)^ord(key_char))
 
-    return base64.b64encode(result.encode('latin-1')).decode('utf-8')
+    return base64.b64encode(result.encode('utf-8')).decode('utf-8')
 
 @tool
 def decode(ciphertext: str):

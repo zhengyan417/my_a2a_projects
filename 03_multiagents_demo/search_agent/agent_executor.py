@@ -18,22 +18,21 @@ from a2a.types import (
 )
 from a2a.utils.errors import ServerError
 from google.adk import Runner
+from google.adk.sessions import Session
 from google.genai import types
 
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-# Constants
 DEFAULT_USER_ID = 'self'
 
+# Executor继承类
 class SearchAgentExecutor(AgentExecutor):
 
     def __init__(self, runner: Runner, card: AgentCard):
         self.runner = runner
         self._card = card
-        # Track active sessions for potential cancellation
-        self._active_sessions: set[str] = set()
 
     async def _process_request(
             self,
@@ -41,65 +40,63 @@ class SearchAgentExecutor(AgentExecutor):
             session_id: str,
             task_updater: TaskUpdater,
     ) -> None:
+        # 1.更新或者插入会话id
         session_obj = await self._upsert_session(session_id)
-        # Update session_id with the ID from the resolved session object.
-        # (it may be the same as the one passed in if it already exists)
         session_id = session_obj.id
 
-        # Track this session as active
-        self._active_sessions.add(session_id)
+        # 2. 运行智能体，处理请求
+        async for event in self.runner.run_async(
+                session_id=session_id,
+                user_id=DEFAULT_USER_ID,
+                new_message=new_message,
+        ):
+            # 2.1 请求结束
+            if event.is_final_response():
+                parts = [
+                    convert_genai_part_to_a2a(part)
+                    for part in event.content.parts
+                    if (part.text or part.file_data or part.inline_data)
+                ]
+                logger.debug('Yielding final response: %s', parts)
+                await task_updater.add_artifact(parts)
+                await task_updater.update_status( # 更新任务状态：结束
+                    TaskState.completed, final=True
+                )
+                break
+            # 2.2 回应事件
+            if not event.get_function_calls():
+                logger.debug('Yielding update response')
+                await task_updater.update_status( # 更新任务状态:工作中
+                    TaskState.working,
+                    message=task_updater.new_agent_message(
+                        [
+                            convert_genai_part_to_a2a(part)
+                            for part in event.content.parts
+                            if (
+                                part.text
+                                or part.file_data
+                                or part.inline_data
+                        )
+                        ],
+                    ),
+                )
+            else:
+                logger.debug('Skipping event')
 
-        try:
-            async for event in self.runner.run_async(
-                    session_id=session_id,
-                    user_id=DEFAULT_USER_ID,
-                    new_message=new_message,
-            ):
-                if event.is_final_response():
-                    parts = [
-                        convert_genai_part_to_a2a(part)
-                        for part in event.content.parts
-                        if (part.text or part.file_data or part.inline_data)
-                    ]
-                    logger.debug('Yielding final response: %s', parts)
-                    await task_updater.add_artifact(parts)
-                    await task_updater.update_status(
-                        TaskState.completed, final=True
-                    )
-                    break
-                if not event.get_function_calls():
-                    logger.debug('Yielding update response')
-                    await task_updater.update_status(
-                        TaskState.working,
-                        message=task_updater.new_agent_message(
-                            [
-                                convert_genai_part_to_a2a(part)
-                                for part in event.content.parts
-                                if (
-                                    part.text
-                                    or part.file_data
-                                    or part.inline_data
-                            )
-                            ],
-                        ),
-                    )
-                else:
-                    logger.debug('Skipping event')
-        finally:
-            # Remove from active sessions when done
-            self._active_sessions.discard(session_id)
-
+    # 核心方法，连接服务器时首先执行这个方法
     async def execute(
             self,
             context: RequestContext,
             event_queue: EventQueue,
     ):
-        # Run the agent until either complete or the task is suspended.
+        # 运行智能体直到任务完成或者暂停
+        # 1. 实例化updater
         updater = TaskUpdater(event_queue, context.task_id, context.context_id)
-        # Immediately notify that the task is submitted.
+        # 2. 提交任务
         if not context.current_task:
             await updater.update_status(TaskState.submitted)
-        await updater.update_status(TaskState.working)
+        await updater.update_status(TaskState.working)  # 任务状态：工作
+        # 3. 处理请求
         await self._process_request(
             types.UserContent(
                 parts=[
@@ -112,30 +109,13 @@ class SearchAgentExecutor(AgentExecutor):
         )
         logger.debug('execute exiting')
 
-    async def cancel(self, context: RequestContext, event_queue: EventQueue):
-        """Cancel the execution for the given context.
-
-        Currently logs the cancellation attempt as the underlying ADK runner
-        doesn't support direct cancellation of ongoing tasks.
-        """
-        session_id = context.context_id
-        if session_id in self._active_sessions:
-            logger.info(
-                f'Cancellation requested for active weather session: {session_id}'
-            )
-            # TODO: Implement proper cancellation when ADK supports it
-            self._active_sessions.discard(session_id)
-        else:
-            logger.debug(
-                f'Cancellation requested for inactive weather session: {session_id}'
-            )
-
+    async def cancel(
+            self, context: RequestContext, event_queue: EventQueue
+    ) -> None:
         raise ServerError(error=UnsupportedOperationError())
 
-    async def _upsert_session(self, session_id: str) -> 'Session':
-        """Retrieves a session if it exists, otherwise creates a new one.
-
-        Ensures that async session service methods are properly awaited.
+    async def _upsert_session(self, session_id: str) -> Session:
+        """检索或者创建一个会话
         """
         session = await self.runner.session_service.get_session(
             app_name=self.runner.app_name,

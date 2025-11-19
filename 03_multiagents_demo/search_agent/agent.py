@@ -7,10 +7,11 @@ from google.adk.tools.mcp_tool.mcp_toolset import (
     StdioServerParameters,
     StdioConnectionParams, MCPToolset,
 )
-model = LiteLlm(
-    model="openrouter/openai/gpt-4o-mini",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
-)
+model=LiteLlm(
+                model="deepseek/deepseek-chat",
+                api_key=os.environ.get('DEEPSEEK_API_KEY'),
+                base_url="https://api.deepseek.com"
+            )
 
 SYSTEM_PROMPT="""
 # 你是一个搜索智能体，你具有使用搜索引擎的工具，你现在在一个多智能体系统中，用户不会直接给你输入，你只会被规划智能体调用，所以当你被调用时，你要接收规划
@@ -30,21 +31,17 @@ SYSTEM_PROMPT="""
 def create_search_agent() -> LlmAgent:
     """构建ADK智能体"""
     toolset = MCPToolset(
-        # Use StdioConnectionParams for local process communication
         connection_params=StdioConnectionParams(
             server_params=StdioServerParameters(
-                command='python',  # Command to run the server
-                args=["-y",  # Arguments for the command
-                      "../MCPserver/search_MCPserver.py"],
+                command='python',
+                args=[r"C:\study\agent_communication\Projects\myA2AProjects\03_multiagents_demo\MCPserver\search_MCPserver.py"],
             ),
         ),
-        # For remote servers, you would use SseConnectionParams instead:
-        # connection_params=SseConnectionParams(url="http://remote-server:port/path", headers={...})
     )
     return LlmAgent(
         model=model,
         name='search_agent',
         description='一个可以借助搜索引擎搜索相关信息的智能体',
-        instruction="""""",
+        instruction=SYSTEM_PROMPT,
         tools=[toolset],
     )

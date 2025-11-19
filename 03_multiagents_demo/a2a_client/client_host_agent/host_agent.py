@@ -97,6 +97,7 @@ class HostAgent:
         for ra in self.list_remote_agents():
             agent_info.append(json.dumps(ra))
         self.agents = '\n'.join(agent_info)
+
     # 创建client agent
     def create_agent(self) -> Agent:
         return Agent(

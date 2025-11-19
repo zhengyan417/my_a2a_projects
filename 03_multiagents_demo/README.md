@@ -33,18 +33,23 @@ python 03_multiagents_demo/search_agent/__main__.py --port 10002
 ```
 
 #### A2Aclient   
+1. 
 - **修改03_multiagents_demo/a2a_client/client_host_agent/agent.py里已经启动的远程的a2a_server**
+2. 
 ```bash
 cd 03_multiagents_demo/a2a_client    
 adk web --port 8030
 ```
 
 ### 示例用户输入
+1. 智能体介绍
 - 这个智能体系统有什么功能？
+2. 测试单一智能体是否能正常运行
 - 目前文件夹里面有什么文件？
-- 帮我查询init_file.txt里面的内容，注意要先把内容解密，不要直接给我密文
-- 帮我创建一个叫test1.txt的文本文件，里面写上i like using a2a protocol,并且将所有内容进行加密。
-- 明文是beiyouBUPT,帮我加密。
-- 帮我创建一个叫test3,txt的文本文件，里面写上YiTianLearningCosmos的加密后的字符串，以确保文件的安全性。
-- 帮我创建一个叫test4.txt的文本文件，里面写上加密后的字符串：
-- 未加密的明文是my_a2a_projects
+- 帮我加密beiyouBUPT这个字符串
+- 帮我查询当前的时间
+3. 测试多个智能体协同工作
+- 帮我创建一个叫test3,txt的文本文件，里面写上YiTianLearningCosmos的加密后的字符串，以确保文件的安全性,同时在文件末尾添加当前时间。
+4. 测试输入不完整的task能否正常处理
+- 帮我创建一个叫test4.txt的文本文件，里面写上我目前居住城市的天气，注意要加密
+- 忘了说了，我现在居住在BeiJing

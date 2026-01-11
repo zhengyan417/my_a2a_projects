@@ -125,12 +125,12 @@ class ParseAndChat(Workflow):
 
     @step # 解析
     async def parse(self, ctx: Context, ev: ParseEvent) -> ChatEvent:
-        ctx.write_event_to_stream(LogEvent(msg='Parsing document...')) # 推送事件
+        ctx.write_event_to_stream(LogEvent(msg='解析文件中...')) # 推送事件
         results = await self._parser.aparse(
             base64.b64decode(ev.attachment),
             extra_info={'file_name': ev.file_name},
         ) # 解析文件
-        ctx.write_event_to_stream(LogEvent(msg='Document parsed successfully.')) # 推送事件
+        ctx.write_event_to_stream(LogEvent(msg='文件解析完成')) # 推送事件
 
         documents = await results.aget_markdown_documents(split_by_page=False) # 转换成markdown文件
 
@@ -147,12 +147,12 @@ class ParseAndChat(Workflow):
     async def chat(self, ctx: Context, event: ChatEvent) -> ChatResponseEvent:
         current_messages = await ctx.store.get('messages', default=[]) # 获取历史信息
         current_messages.append(ChatMessage(role='user', content=event.msg)) # 添加用户信息
-        ctx.write_event_to_stream(LogEvent(msg=f'Chatting with {len(current_messages)} initial messages.')) # 推送事件
+        ctx.write_event_to_stream(LogEvent(msg=f'当前消息数量:{len(current_messages)}')) # 推送事件
 
         document_text = await ctx.store.get('document_text', default='') # 获取文件内容
 
         if document_text: # 如果有文件内容
-            ctx.write_event_to_stream(LogEvent(msg='Inserting system prompt...')) # 推送事件
+            ctx.write_event_to_stream(LogEvent(msg='添加系统提示词...')) # 推送事件
             prompt = self._system_prompt_template.format(document_text=document_text) # 获取系统提示
 
             history = "\n".join(

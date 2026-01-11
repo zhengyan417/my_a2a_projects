@@ -61,18 +61,18 @@ class FileParseAgentExecutor(AgentExecutor):
         task_id = context.task_id # 获取任务ID
         try:
             # 检查这个会话是否已经存在
-            print(f'Len of ctx_states: {len(self.ctx_states)}', flush=True) # 打印会话数量
+            print(f'会话状态数量: {len(self.ctx_states)}', flush=True) # 打印会话数量
             saved_ctx_state = self.ctx_states.get(context_id, None) # 获取保存的会话状态
 
             if saved_ctx_state is not None: # 如果会话状态已经存在
-                logger.info(f'Resuming session {context_id} with saved context') # 输出会话信息
+                logger.info(f'从已经保存的上下文中恢复会话:{context_id}') # 输出会话信息
                 ctx = Context.from_dict(self.agent, saved_ctx_state) # 从字典中恢复会话状态
                 handler = self.agent.run( # 运行智能体
                     start_event=input_event, # 输出事件
                     ctx=ctx, # 上下文
                 )
             else: # 如果会话状态不存在
-                logger.info(f'Starting new session {context_id}') # 打印日志
+                logger.info(f'启动一个新的会话:{context_id}') # 打印日志
                 handler = self.agent.run( # 直接运行智能体
                     start_event=input_event, # 输入事件
                 )
@@ -107,7 +107,7 @@ class FileParseAgentExecutor(AgentExecutor):
                 await updater.complete() # 完成任务
             else: # 如果不是聊天事件
                 # 创建信息
-                msg = new_agent_text_message(f'Unexpected completion {final_response}', context_id, task_id)
+                msg = new_agent_text_message(f'预期之外的结果: {final_response}', context_id, task_id)
                 await updater.failed(msg) # 任务失败
 
         except Exception as e: # 异常捕获

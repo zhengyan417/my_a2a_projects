@@ -31,7 +31,7 @@ from a2a.types import (
 
 # 命令行参数设置
 @click.command()
-@click.option('--agent', default='http://localhost:10000')
+@click.option('--agent', default='http://127.0.0.1:10001')
 @click.option(
 '--bearer-token',
     help='Bearer token for authentication.',
@@ -57,6 +57,7 @@ async def cli(
     header,
     enabled_extensions,
 ):
+
     # 构建HTTP头部请求字典
     headers = {h.split('=')[0]: h.split('=')[1] for h in header}
     if bearer_token:
@@ -315,10 +316,3 @@ async def completeTask(
 
 if __name__ == '__main__':
     asyncio.run(cli())
-
-"""
-python __main__.py --agent  http://localhost:10000 --session 123
-
-query = 帮我解密一下这串密文
-query = 这串密文是KCM3LSM7JycOAx4Q
-"""

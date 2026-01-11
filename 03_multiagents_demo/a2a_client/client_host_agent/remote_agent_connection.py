@@ -42,7 +42,7 @@ class RemoteAgentConnections:
                     return event[0]
                 lastTask = event[0]
         except Exception as e:
-            print('Exception found in send_message')
+            print('发送消息的时候出现了异常')
             traceback.print_exc()
             raise e
         return lastTask

@@ -1,8 +1,4 @@
 import logging
-import os
-import sys
-from email.policy import default
-
 import click
 import httpx
 import uvicorn
@@ -73,24 +69,3 @@ def main(host, port):
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

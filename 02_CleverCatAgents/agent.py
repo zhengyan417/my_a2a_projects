@@ -73,8 +73,8 @@ class CleverCatAgent:
             system_prompt=self.system_prompt,
             middleware=[SummarizationMiddleware(
                 model=llm,
-                max_tokens_before_summary=4000,  # Trigger summarization at 4000 tokens
-                messages_to_keep=20,  # Keep last 20 messages after summary
+                max_tokens_before_summary=4000,
+                messages_to_keep=20,
             )],
             checkpointer=InMemorySaver(),
             response_format=ToolStrategy(ResponseFormat)

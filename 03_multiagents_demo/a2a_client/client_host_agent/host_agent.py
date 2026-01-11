@@ -202,7 +202,7 @@ Current agent: {current_agent['active_agent']}
         task_id = state.get('task_id', None)
         context_id = state.get('context_id', None)
         message_id = state.get('message_id', None)
-        task: Task
+        # task: Task
         if not message_id:
             message_id = str(uuid.uuid4())
 

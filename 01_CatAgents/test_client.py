@@ -14,7 +14,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
 
-    base_url = 'http://localhost:8888'
+    base_url = 'http://localhost:7890'
 
     # 客户端
     async with httpx.AsyncClient() as httpx_client:

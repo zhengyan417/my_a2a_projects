@@ -209,41 +209,38 @@ class ParseAndChat(Workflow):
 
 
 async def main():
-    """Test script for the ParseAndChat agent."""
-    agent = ParseAndChat()
-    ctx = Context(agent)
+    """测试文件解析智能体"""
+    agent = ParseAndChat() # 获取文件解析智能体
+    ctx = Context(agent) # 创建上下文
 
-    with open('attention.pdf', 'rb') as f:
-        attachment = f.read()
-        attachment = base64.b64encode(attachment).decode()
+    with open('attention.pdf', 'rb') as f: # 打开PDF文件
+        attachment = f.read() # 获取文件内容
+        attachment = base64.b64encode(attachment).decode() # 解码文件内容
 
-    handler = agent.run(
-        start_event=InputEvent(
-            msg='这篇文章讲了什么',
-            attachment=attachment,
-            file_name='test.pdf',
+    handler = agent.run( # 运行智能体
+        start_event=InputEvent( # 创建输出事件
+            msg='这篇文章讲了什么', # 输入
+            attachment=attachment, # 文件内容
+            file_name='test.pdf', # 文件名
         ),
-        ctx=ctx,
+        ctx=ctx, # 上下文
     )
 
-    response: ChatResponseEvent = await handler
+    response: ChatResponseEvent = await handler # 获取回复
 
-    print(response.response)
-    for citation_number, citation_texts in response.citations.items():
-        print(f'Citation {citation_number}: {citation_texts}')
+    print(response.response) # 打印回复
+    for citation_number, citation_texts in response.citations.items(): # 获取所有引用
+        print(f'引用 {citation_number}: {citation_texts}') # 打印引用
 
-    handler = agent.run(
-        msg='我刚才问你的上一个问题,你是怎么回答的?',
-        ctx=ctx,
+    handler = agent.run( # 再运行一次，测试记忆能力
+        msg='我刚才问你的上一个问题,你是怎么回答的?', # 输入
+        ctx=ctx, # 上下文
     )
-    response: ChatResponseEvent = await handler
-    print(response.response)
+    response: ChatResponseEvent = await handler # 获取回复
+    print(response.response) # 打印回复
 
 
 if __name__ == '__main__':
-    import dotenv
-    dotenv.load_dotenv()
+    import asyncio # 引用异步IO
 
-    import asyncio
-
-    asyncio.run(main())
+    asyncio.run(main()) # 运行主函数

@@ -168,7 +168,7 @@ class ParseAndChat(Workflow):
         response = await self._llm.acomplete(prompt) # 调用模型
         raw_output = response.text.strip() # 获取模型输出
 
-        parser = PydanticOutputParser(ChatResponse)  # 创建解析器
+        parser = PydanticOutputParser(pydantic_object=ChatResponse)  # 创建解析器
         try:
             response_obj: ChatResponse = parser.parse(raw_output) # 解析结构化输出
         except ValueError as _: # 如果本来就没有文件内容

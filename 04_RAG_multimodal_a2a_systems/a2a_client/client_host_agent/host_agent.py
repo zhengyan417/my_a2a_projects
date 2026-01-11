@@ -1,270 +1,246 @@
-import asyncio
 import base64
-import json
 import os
-import sys
-import uuid
 
-import httpx
+from typing import Any
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+from llama_index.core.output_parsers import PydanticOutputParser
 
-from a2a.client import A2ACardResolver, ClientConfig
-from a2a.types import (
-    DataPart,
-    Part,
-    Role,
-    TextPart,
-    TransportProtocol
+from llama_cloud_services.parse import LlamaParse
+from llama_index.core.llms import ChatMessage
+from llama_index.core.workflow import (
+    Context,
+    Event,
+    StartEvent,
+    StopEvent,
+    Workflow,
+    step,
 )
-from dotenv import load_dotenv
-from google.adk import Agent
-from google.adk.agents.callback_context import CallbackContext
-from google.adk.agents.readonly_context import ReadonlyContext
-from google.adk.models.lite_llm import LiteLlm
-from google.adk.tools.tool_context import ToolContext
-from google.genai import types
-from remote_agent_connection import *
-from timestamp_ext import TimestampExtension
-
-load_dotenv() # 夹杂环境变量
+from llama_index.llms.dashscope import DashScope, DashScopeGenerationModels
+from pydantic import BaseModel, Field
 
 
-class HostAgent:
-    """这个智能体负责协调远程智能体"""
+# 打印事件
+class LogEvent(Event):
+    msg: str # 消息
 
+# 输入的event
+class InputEvent(StartEvent):
+    msg: str # 消息
+    attachment: str | None = None # 文件内容
+    file_name: str | None = None # 文件名
+
+# 解析的 event
+class ParseEvent(Event):
+    attachment: str # 文件内容
+    file_name: str # 文件名
+    msg: str # 消息
+
+# 聊天 Event
+class ChatEvent(Event):
+    msg: str # 消息
+
+# 输出的 event
+class ChatResponseEvent(StopEvent):
+    response: str # 回复
+    citations: dict[int, list[str]] # 引用
+
+
+## 结构化输出
+# 引用
+class Citation(BaseModel):
+    """文件里面特定行的引用内容"""
+
+    # 引用编号
+    citation_number: int = Field(
+        description='生成回答时出现的引用编号'
+    )
+    # 引用的行数
+    line_numbers: list[int] = Field(
+        description='文件里面被引用的内容所在的行数'
+    )
+
+# 聊天回复
+class ChatResponse(BaseModel):
+    """对用户最终的回复内容"""
+    # 回复信息
+    response: str = Field(
+        description='对用户的最终回复'
+    )
+    # 引用
+    citations: list[Citation] = Field(
+        default=list,
+        description='包含了多个引用的列表,每一个引用都是行数,可以直接映射到对应的内容',
+    )
+
+# 工作流
+class ParseAndChat(Workflow):
     def __init__( # 初始化
         self,
-        remote_agent_addresses: list[str], # 远程智能体的URL
-        http_client: httpx.AsyncClient, # httpx客户端
-        task_callback: TaskUpdateCallback | None = None, # 任务更新回调
+        timeout: float | None = None, # 超时时间
+        verbose: bool = False, # 是否打印日志
+        **workflow_kwargs: Any, # 其他参数
     ):
-        self.task_callback = task_callback # 任务回调
-        self.httpx_client = http_client # httpx客户端
-        self.timestamp_extension = TimestampExtension() # 时间戳扩展
-        config = ClientConfig( # 创建客户端配置
-            httpx_client=self.httpx_client, # httpx客户端
-            supported_transports=[ # 支持的传输协议
-                TransportProtocol.jsonrpc, # jsonrpc协议
-                TransportProtocol.http_json, # http_json协议
-            ],
-        )
-        client_factory = ClientFactory(config) # 创建客户端工厂
-        client_factory = self.timestamp_extension.wrap_client_factory( # 时间戳扩展
-            client_factory
-        )
-        self.client_factory = client_factory # 客户端工厂
-        self.remote_agent_connections: dict[str, RemoteAgentConnections] = {} # 远程智能体连接
-        self.cards: dict[str, AgentCard] = {} # 智能体卡片
-        self.agents: str = '' # 智能体名称
-        loop = asyncio.get_running_loop() # 获取当前运行的loop
-        loop.create_task( # 创建一个任务
-             self.init_remote_agent_addresses(remote_agent_addresses) # 初始化远程智能体的地址
-        )
+        super().__init__(timeout=timeout, verbose=verbose, **workflow_kwargs) # 父类初始化
+        self._llm = DashScope(
+            model_name=DashScopeGenerationModels.QWEN_MAX,
+            api_key=os.getenv('DASHSCOPE_API_KEY'),
+        ) # 大语言模型
+        self._parser = LlamaParse(api_key=os.getenv('LLAMA_CLOUD_API_KEY')) # 文档解析器
+        self._system_prompt_template = """ 
+你是一个乐于助人的助手，能够回答关于文档的问题、提供引用，并进行对话。
 
-    async def init_remote_agent_addresses( # 获取所有的远程的agent的信息
-        self, remote_agent_addresses: list[str] # 所有远程智能体的地址
-    ):
-        async with asyncio.TaskGroup() as task_group: # 创建一个任务组
-            for address in remote_agent_addresses: # 遍历每一个地址
-                task_group.create_task(self.retrieve_card(address)) # 对每一个地址获取智能体卡片
+以下是带行号的文档内容：  
+  
+{document_text}  
 
-    # 获取智能体卡片
-    async def retrieve_card(self, address: str):
-        card_resolver = A2ACardResolver(self.httpx_client, address) # 创建一个智能体卡片解析器
-        card = await card_resolver.get_agent_card() # 解析智能体卡片
-        self.register_agent_card(card) # 注册智能体卡片
+在引用文档内容时，请遵守以下规则：
 
-    # 注册智能体卡片
-    def register_agent_card(self, card: AgentCard): # 注册智能体卡片
-        remote_connection = RemoteAgentConnections(self.client_factory, card) # 创建一个远程智能体连接
-        self.remote_agent_connections[card.name] = remote_connection # 保存远程智能体连接
-        self.cards[card.name] = card # 保存智能体卡片
-        agent_info = [] # 初始化智能体信息列表
-        for ra in self.list_remote_agents(): # 遍历所有远程智能体
-            agent_info.append(json.dumps(ra)) # 转换为json字符串
-        self.agents = '\n'.join(agent_info) # 拼接成字符串
+1. 你的行内引用编号必须从 [1] 开始，并在每次新增引用时依次递增（即下一个引用为 [2]，再下一个是 [3]，依此类推）。
+2. 每个引用编号必须对应文档中的具体行号。
+3. 如果某处引用覆盖了连续的多行内容，请尽量使用一个引用编号来涵盖所有相关行。
+4. 如果某处引用需要覆盖不连续的多行，可以使用类似 [2, 3, 4] 的格式（表示该引用对应第 2、3、4 行）。
+5. 例如：如果回答中包含 “Transformer 架构……[1]。” 和 “注意力机制……[2]。”，且这两句话分别来自文档的第 10–12 行和第 45–46 行，那么对应的引用应为：citations = [[10, 11, 12], [45, 46]]。
+6. 务必从 [1] 开始编号，并按顺序递增。绝对不要直接用行号作为引用编号（例如不要写成 [10] 来表示第 10 行），否则我会丢掉工作。
 
-    # 创建客户端智能体
-    def create_agent(self) -> Agent:
-        return Agent( # 创建智能体
-            model=LiteLlm( # 创建LiteLlm模型
-                model="dashscope/qwen-max", # 通义千问模型
-                api_key=os.environ.get('DASHSCOPE_API_KEY'), # APIKEY
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1" # 模型地址
-            ),
-            name='A2A客户端智能体', # 模型名称
-            instruction=self.root_instruction, # 系统提示词
-            before_model_callback=self.before_model_callback, # 模型调用之前处理逻辑
-            description="这个智能体负责将用户请求拆解为可由子智能体执行的任务", # 描述
-            tools=[ # 工具列表
-                self.list_remote_agents, # 列出远程智能体
-                self.send_message, # 发送消息
-            ],
-        )
+请严格按照以下 JSON 格式回答，不要包含任何其他内容：
+{{
+  "response": "你的回答文本",
+  "citations": [
+    {{
+      "citation_number": 1,
+      "line_numbers": [10, 11, 12]
+    }},
+    ...
+  ]
+}}
+""" # 系统提示词
 
-    def root_instruction(self, context: ReadonlyContext) -> str: # 获取系统提示
-        current_agent = self.check_state(context) # 获取当前智能体
-        return f"""你是一位专业的任务分派专家，能够将用户请求委派给合适的远程智能体（Agent）。
+    @step # 路由
+    def route(self, ev: InputEvent) -> ParseEvent | ChatEvent:
+        if ev.attachment: # 如果有文件
+            return ParseEvent(
+                attachment=ev.attachment, file_name=ev.file_name, msg=ev.msg
+            ) # 返回解析事件
+        return ChatEvent(msg=ev.msg) # 返回聊天事件
 
-发现能力：
-- 你可以使用 `list_remote_agents` 工具来列出当前可用的远程智能体，以便选择合适的对象来处理任务。
+    @step # 解析
+    async def parse(self, ctx: Context, ev: ParseEvent) -> ChatEvent:
+        ctx.write_event_to_stream(LogEvent(msg='解析文件中...')) # 推送事件
+        results = await self._parser.aparse(
+            base64.b64decode(ev.attachment),
+            extra_info={'file_name': ev.file_name},
+        ) # 解析文件
+        ctx.write_event_to_stream(LogEvent(msg='文件解析完成')) # 推送事件
 
-执行操作：
-- 对于需要执行具体操作的请求，你可以使用 `send_message` 工具与远程智能体交互，以完成相应动作。
+        documents = await results.aget_markdown_documents(split_by_page=False) # 转换成markdown文件
 
-在回复用户时，请务必注明所使用的远程智能体名称。
+        document = documents[0] # 使用第一页文件就行(因为没有分页)
 
-请始终依赖工具来处理用户请求，切勿自行编造答案。如果你不确定如何处理，请向用户询问更多细节。
-请主要关注对话中最近的部分。
+        document_text = '' # 文件内容
+        for idx, line in enumerate(document.text.split('\n')): # 一行一行读取
+            document_text += f"<line idx='{idx}'>{line}</line>\n" # 内容格式化
 
-可用智能体：
-{self.agents}
+        await ctx.store.set('document_text', document_text) # 保存文件内容
+        return ChatEvent(msg=ev.msg) # 返回聊天事件
 
-当前活跃智能体：{current_agent['active_agent']}
-"""
+    @step # 聊天
+    async def chat(self, ctx: Context, event: ChatEvent) -> ChatResponseEvent:
+        current_messages = await ctx.store.get('messages', default=[]) # 获取历史信息
+        current_messages.append(ChatMessage(role='user', content=event.msg)) # 添加用户信息
+        ctx.write_event_to_stream(LogEvent(msg=f'当前消息数量:{len(current_messages)}')) # 推送事件
 
-    # 检查不同A2A server状态
-    @staticmethod
-    def check_state(context: ReadonlyContext):
-        state = context.state # 获取当前状态
-        if (
-            'context_id' in state # 如果有context_id
-            and 'session_active' in state # 如果有session_active
-            and state['session_active'] # 如果session_active为True
-            and 'agent' in state # 如果有agent
-        ):
-            return {'active_agent': f'{state["agent"]}'} # 返回当前激活的智能体
-        return {'active_agent': 'None'} # 返回None
+        document_text = await ctx.store.get('document_text', default='') # 获取文件内容
 
-    @staticmethod
-    def before_model_callback(callback_context: CallbackContext, llm_request): # 模型调用之前处理逻辑
+        if document_text: # 如果有文件内容
+            ctx.write_event_to_stream(LogEvent(msg='添加系统提示词...')) # 推送事件
+            prompt = self._system_prompt_template.format(document_text=document_text) # 获取系统提示
 
-        state = callback_context.state # 获取当前状态
-        if 'session_active' not in state or not state['session_active']: # 如果当前会话状态没有激活
-            state['session_active'] = True # 激活当前会话状态
+            history = "\n".join(
+                f"{msg.role.upper()}: {msg.content}"
+                for msg in current_messages[:-1]
+            ) # 获取对话历史
+            if history: # 如果有对话历史
+                prompt += f"\n\n对话历史:\n{history}" # 添加对话历史
+            prompt += f"\n\nUSER: {event.msg}" # 添加用户提问
+        else: # 如果没有文件内容
+            prompt = f"USER: {event.msg}\n\n请直接回答。" # 获取用户提问
 
-    # 列出远程可以的使用的智能体的信息
-    def list_remote_agents(self):
-        """列出所有可以远程指派任务的智能体"""
-        if not self.remote_agent_connections: # 如果没有远程智能体
-            return [] # 返回空列表
+        response = await self._llm.acomplete(prompt) # 调用模型
+        raw_output = response.text.strip() # 获取模型输出
 
-        remote_agent_info = [] # 初始化远程智能体列表
-        for card in self.cards.values(): # 遍历所有远程智能体
-            remote_agent_info.append( # 添加远程智能体信息
-                {'name': card.name, 'description': card.description} # 名字与描述
-            )
-        return remote_agent_info # 返回远程智能体列表
+        parser = PydanticOutputParser(ChatResponse)  # 创建解析器
+        try:
+            response_obj: ChatResponse = parser.parse(raw_output) # 解析结构化输出
+        except ValueError as _: # 如果本来就没有文件内容
+            response_obj = ChatResponse(response=raw_output, citations=[]) # 只返回消息即可
 
-    # 发送信息
-    async def send_message(
-        self, agent_name: str, message: str, tool_context: ToolContext
-    ):
-        """向指定的远程智能体发送一个任务，支持流式传输（若该智能体支持）或非流式传输。"""
+        current_messages.append(
+            ChatMessage(role='assistant', content=response_obj.response)
+        ) # 保存信息
+        await ctx.store.set('messages', current_messages) # 保存信息
 
-        state = tool_context.state # 获取当前状态
-        state['agent'] = agent_name # 获取智能体名字
-        client = self.remote_agent_connections[agent_name] # 获取远程智能体连接客户端
+        citations = {} # 创建引用字典
+        if document_text and response_obj.citations: # 如果有文件内容且有引用
+            for citation in response_obj.citations: # 遍历引用
+                line_numbers = citation.line_numbers # 获取行号
+                texts = [] # 创建文本列表
+                for line_number in line_numbers: # 遍历行号
+                    start_tag = f"<line idx='{line_number}'>" # 获取起始标签
+                    end_tag = f"<line idx='{line_number + 1}'>" # 获取结束标签
+                    start_idx = document_text.find(start_tag) # 获取起始索引
+                    if start_idx == -1: # 如果找不到起始标签
+                        continue # 跳过
+                    end_idx = document_text.find(end_tag, start_idx) # 获取结束索引
+                    if end_idx == -1: # 如果找不到结束标签
+                        # 找下一个 </line> 或结尾
+                        end_idx = document_text.find("</line>", start_idx) # 获取结束索引
+                        if end_idx != -1: # 如果找不到结束标签
+                            end_idx += len("</line>") # 加上结束标签长度
+                        else: # 否则
+                            end_idx = len(document_text) # 设置结束索引为结尾
+                    content = document_text[start_idx + len(start_tag):end_idx].replace('</line>', '').strip() # 获取内容
+                    texts.append(content) # 添加内容
+                citations[citation.citation_number] = texts # 添加引用的内容
 
-        task_id = None # 生成任务ID
-        context_id = state.get('context_id', None) # 获取上下文ID
-        message_id = str(uuid.uuid4()) # 生成消息ID
+        return ChatResponseEvent(
+            response=response_obj.response,
+            citations=citations
+        ) # 返回结果
 
-        # 2. 建立信息格式
-        request_message = Message( # 创建消息
-            role=Role.user, # 角色
-            parts=[Part(root=TextPart(text=message))], # 内容
-            message_id=message_id, # 消息ID
-            context_id=context_id, # 上下文ID
-            task_id=task_id, # 任务ID
-        )
 
-        # 添加用户上传的文件
-        # for part in tool_context.message.parts:
-        #     root = part.root
-        #     if hasattr(root, 'inline_data') and root.inline_data is not None:
-        #         inline_data = root.inline_data
-        #         data = inline_data.data
-        #         message.parts.append(
-        #             Part(
-        #                 root=FilePart(
-        #                     file=FileWithBytes(name="upload_file", bytes=data)
-        #                 )
-        #             )
-        #         )
+async def main():
+    """测试文件解析智能体"""
+    agent = ParseAndChat() # 获取文件解析智能体
+    ctx = Context(agent) # 创建上下文
 
-        # 3. 发送信息
-        response = await client.send_message(request_message) # 发送消息，获取回复
+    with open('attention.pdf', 'rb') as f: # 打开PDF文件
+        attachment = f.read() # 获取文件内容
+        attachment = base64.b64encode(attachment).decode() # 解码文件内容
 
-        # 4. 分析response
-        # 4.1 message：转换格式后直接返回
-        if isinstance(response, Message): # 如果是消息
-            return await convert_parts(response.parts, tool_context) # 直接返回
+    handler = agent.run( # 运行智能体
+        start_event=InputEvent( # 创建输出事件
+            msg='这篇文章讲了什么', # 输入
+            attachment=attachment, # 文件内容
+            file_name='test.pdf', # 文件名
+        ),
+        ctx=ctx, # 上下文
+    )
 
-        # 4.2 task: 判断task状态
-        task: Task = response # 获取任务
-        state['session_active'] = task.status.state not in [ # 当前会话是否仍然在进行中
-            TaskState.completed,
-            TaskState.canceled,
-            TaskState.failed,
-            TaskState.unknown,
-        ]
-        # 更新状态
-        if task.context_id: # 如果有context_id
-            state['context_id'] = task.context_id # 保存上下文 ID
+    response: ChatResponseEvent = await handler # 获取回复
 
-        if task.status.state == TaskState.input_required: # 需要用户额外输入
-            tool_context.actions.skip_summarization = True # 保留原始信息
-            tool_context.actions.escalate = True # 交还控制权
-        elif task.status.state == TaskState.canceled: # 如果任务取消
-            return f"任务取消,请稍后再试" # 返回错误信息
-        elif task.status.state == TaskState.failed: # 如果任务出错
-            raise ValueError(f'{agent_name}任务({task.id})处理失败') # 抛出异常
+    print(response.response) # 打印回复
+    for citation_number, citation_texts in response.citations.items(): # 获取所有引用
+        print(f'引用 {citation_number}: {citation_texts}') # 打印引用
 
-        response = [] # 初始化回复列表
-        if task.status.message: # 如果有任务信息
-            if ts := self.timestamp_extension.get_timestamp( # 添加时间戳
-                Message(parts=[Part(root=TextPart(text=task.status.message))], message_id=message_id,role=Role.agent)# 消息
-            ):
-                response.append(f'[at {ts.astimezone().isoformat()}]') # 添加包含时间戳的消息
-            response.extend( # 添加任务信息
-                await convert_parts(task.status.message.parts, tool_context) # 装换格式
-            )
-        if task.artifacts: # 如果有任务结果
-            for artifact in task.artifacts: # 遍历所有结果
-                if ts := self.timestamp_extension.get_timestamp(artifact): # 时间戳
-                    response.append(f'[at {ts.astimezone().isoformat()}]') # 添加时间戳
-                response.extend( # 添加结果
-                    await convert_parts(artifact.parts, tool_context) # 装换格式
-                )
-        return response # 返回回复
+    handler = agent.run( # 再运行一次，测试记忆能力
+        msg='我刚才问你的上一个问题,你是怎么回答的?', # 输入
+        ctx=ctx, # 上下文
+    )
+    response: ChatResponseEvent = await handler # 获取回复
+    print(response.response) # 打印回复
 
-# 转换格式工具函数
-async def convert_parts(parts: list[Part], tool_context: ToolContext):
-    res = [] # 初始化结果
-    for p in parts: # 遍历所有部分
-        res.append(await convert_part(p, tool_context)) # 转换每一个内容
-    return res # 返回结果
 
-async def convert_part(part: Part, tool_context: ToolContext): # 格式转换
-    if part.root.kind == 'text': # 如果是文本
-        return part.root.text # 返回文本
-    if part.root.kind == 'data': # 如果是数据
-        return part.root.data # 返回数据
-    # 处理文件
-    if part.root.kind == 'file': # 如果是文件
-        file_id = part.root.file.name # 获取文件ID
-        file_bytes = base64.b64decode(part.root.file.bytes) # 获取文件内容
-        file_part = types.Part( # 创建文件内容
-            inline_data=types.Blob( # 创建文件内容
-                mime_type=part.root.file.mime_type, data=file_bytes
-            )
-        )
-        await tool_context.save_artifact(file_id, file_part) # 保存文件
-        tool_context.actions.skip_summarization = True # 跳过总结
-        tool_context.actions.escalate = True # 升级
-        return DataPart(data={'artifact-file-id': file_id}) # 返回文件ID
-    return f'Unknown type: {part.kind}' # 返回未知类型
+if __name__ == '__main__':
+    import asyncio # 引用异步IO
+
+    asyncio.run(main()) # 运行主函数

@@ -1,3 +1,6 @@
+import warnings
+warnings.filterwarnings("ignore") # 忽略所有警告
+
 import asyncio
 import base64
 import os
@@ -132,7 +135,7 @@ async def cli( # 命令行函数
                     task_response.model_dump_json(
                         include={'result': {'history': True}}
                     )
-                ) # 打印任务结果
+                ) #打印结果
 
 async def completeTask( # 任务处理函数
     client: A2AClient, # A2A客户端

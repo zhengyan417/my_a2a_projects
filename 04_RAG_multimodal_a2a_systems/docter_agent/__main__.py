@@ -10,8 +10,8 @@ from a2a.types import (
     AgentCard,
     AgentSkill,
 )
-from agent_executor import FileParseAgentExecutor
-from agent import ParseAndChat
+from agent_executor import DoctorRAGAgentExecutor
+from agent import DoctorRAGWorkflow
 
 from dotenv import load_dotenv
 load_dotenv() # 加载环境变量
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__) # 创建日志记录器
 
 @click.command() # 创建命令行接口
 @click.option('--host', 'host', default='localhost') # 主机
-@click.option('--port', 'port', default=10001) # 端口
+@click.option('--port', 'port', default=10003) # 端口
 def main(host, port): # 主函数
     """启动A2A服务器"""
     try:
@@ -30,28 +30,28 @@ def main(host, port): # 主函数
         )
 
         skill = AgentSkill( # 智能体技能
-            id='parse_and_chat', # 技能ID
-            name='文件解析和聊天', # 技能名称
-            description='解析文件并且使用解析后的内容进行聊天', # 技能描述
-            tags=['parse', 'chat', 'file', 'llama_parse'], # 技能标签
-            examples=['这个文件讲了什么?'], # 技能示例
+            id='doctor_rag_query', # 技能ID
+            name='医生RAG查询', # 技能名称
+            description='基于医学知识库进行查询并回答健康问题', # 技能描述
+            tags=['medical', 'health', 'rag', 'doctor'], # 技能标签
+            examples=['我最近经常头痛怎么办？', '高血压有哪些症状？'], # 技能示例
         )
 
         agent_card = AgentCard( # 智能体卡片
-            name='文档解析智能体', # 智能体名称
-            description='解析文件并且使用解析后的内容进行聊天', # 智能体描述
+            name='医生智能体', # 智能体名称
+            description='基于医学知识库的专业医生助手，可以回答健康和医疗相关问题', # 智能体描述
             url=f'http://{host}:{port}/', # 智能体URL
             version='1.0.0', # 智能体版本
-            default_input_modes=FileParseAgentExecutor.SUPPORTED_INPUT_TYPES, # 智能体输入格式
-            default_output_modes=FileParseAgentExecutor.SUPPORTED_OUTPUT_TYPES, # 智能体输出格式
+            default_input_modes=DoctorRAGAgentExecutor.SUPPORTED_INPUT_TYPES, # 智能体输入格式
+            default_output_modes=DoctorRAGAgentExecutor.SUPPORTED_OUTPUT_TYPES, # 智能体输出格式
             capabilities=capabilities, # 智能体能力
             skills=[skill], # 智能体技能
         )
 
         # httpx_client = httpx.AsyncClient()
         request_handler = DefaultRequestHandler( # 创建请求处理器
-            agent_executor=FileParseAgentExecutor( # 创建智能体执行器
-                agent=ParseAndChat(), # 创建智能体
+            agent_executor=DoctorRAGAgentExecutor( # 创建智能体执行器
+                agent=DoctorRAGWorkflow(), # 创建智能体
             ),
             task_store=InMemoryTaskStore(), # 任务存储
             # push_notifier=InMemoryPushNotifier(httpx_client), 推送器
@@ -61,7 +61,7 @@ def main(host, port): # 主函数
         )
         import uvicorn # 导入unicorn模块
 
-        uvicorn.run(server.build(), host=host, port=port) # 运行服务器
+        uvicorn.run(server.build(), host=host, port=port, timeout_keep_alive=300) # 运行服务器
     except Exception as e:
         logger.error(f'在服务器启动时出现错误: {e}') # 错误日志
         exit(1) # 退出

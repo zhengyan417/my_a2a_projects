@@ -21,27 +21,23 @@ from agent import (
     ChatResponseEvent,
     InputEvent,
     LogEvent,
-    ParseAndChat,
+    DoctorRAGWorkflow,
 )
 from llama_index.core.workflow import Context
 
 logger = logging.getLogger(__name__) # 获取日志记录器
 
 
-class FileParseAgentExecutor(AgentExecutor):
+class DoctorRAGAgentExecutor(AgentExecutor):
 
     SUPPORTED_INPUT_TYPES = [
         'text/plain',
-        'application/pdf',
-        'application/msword',
-        'image/png',
-        'image/jpeg',
     ] # 允许的输入格式
     SUPPORTED_OUTPUT_TYPES = ['text', 'text/plain'] # 允许的输出格式
 
     def __init__(
         self,
-        agent: ParseAndChat,
+        agent: DoctorRAGWorkflow,
     ): # 初始化
         self.agent = agent # 智能体
         self.ctx_states: Dict[str, Dict[str, Any]] = {} # 存储会话状态
@@ -101,7 +97,7 @@ class FileParseAgentExecutor(AgentExecutor):
 
                 await updater.add_artifact( # 添加文件
                     parts=[Part(root=TextPart(text=content))], # 回复内容
-                    name='文件解析内容', # 名称
+                    name='医生RAG回答', # 名称
                     metadata=metadata, # 元数据
                 )
                 await updater.complete() # 完成任务
@@ -136,26 +132,17 @@ class FileParseAgentExecutor(AgentExecutor):
 
     @staticmethod
     def _get_input_event(context: RequestContext) -> InputEvent: # 获取输入事件
-        """提取文件内容"""
-        file_data = None # 初始化文件数据
-        file_name = None # 初始化文件名
+        """提取文本内容"""
         text_parts = [] # 初始化文本部分
         for p in context.message.parts: # 遍历消息部分
             part = p.root # 获取内容
-            if isinstance(part, FilePart): # 如果这是文件
-                file_data = part.file.bytes # 获取文件数据
-                file_name = part.file.name # 获取文件名
-                if file_data is None: # 如果文件数据为空
-                    raise ValueError('文件数据缺失!') # 抛出异常
-            elif isinstance(part, TextPart): # 如果这是文本
+            if isinstance(part, TextPart): # 如果这是文本
                 text_parts.append(part.text) # 添加文本部分
             else: # 如果是不支持的文件类型
-                raise ValueError(f'不支持的文件类型: {type(part)}') # 抛出异常
+                raise ValueError(f'医生智能体不支持的输入类型: {type(part)}') # 抛出异常
 
         return InputEvent(
             msg='\n'.join(text_parts), # 用户消息
-            attachment=file_data, # 文件内容
-            file_name=file_name, # 文件名
         ) # 创建输入事件
 
     @staticmethod

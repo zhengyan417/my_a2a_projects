@@ -9,5 +9,7 @@ load_dotenv() # 加载环境变量
 
 root_agent = HostAgent([ # 创建智能体
     os.getenv("FILE_PARSE_AGENT_URL"), # 文件解析智能体
+    os.getenv("CODE_AGENT_URL"),
+    os.getenv("DOCTOR_AGENT_URL"),
     ],
     http_client=AsyncClient()).create_agent() # 创建智能体

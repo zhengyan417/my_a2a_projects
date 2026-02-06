@@ -3,6 +3,7 @@ import base64
 import json
 import os
 import sys
+from typing import Optional
 import uuid
 
 import httpx
@@ -16,6 +17,8 @@ from a2a.types import (
     AgentCard,
     DataPart,
     Message,
+    FilePart,
+    FileWithBytes,
     Part,
     Role,
     Task,
@@ -121,25 +124,24 @@ class HostAgent:
 
     def root_instruction(self, context: ReadonlyContext) -> str:
         current_agent = self.check_state(context)
-        return f"""You are an expert delegator that can delegate the user request to the
-appropriate remote agents.
+        return f"""您是一位擅长将用户请求分派给相应远程代理的专家。
 
-Discovery:
-- You can use `list_remote_agents` to list the available remote agents you
-can use to delegate the task.
+**发现：**
+- 您可以使用 `list_remote_agents` 来列出可用的远程智能体，以便将任务分派给它们。
 
-Execution:
-- For actionable requests, you can use `send_message` to interact with remote agents to take action.
+**执行：**
+- 对于可执行的请求，您可以使用 `send_message` 与远程智能体进行交互，以采取行动。
 
-Be sure to include the remote agent name when you respond to the user.
+**请务必在回复用户时注明远程智能体的名称。**
 
-Please rely on tools to address the request, and don't make up the response. If you are not sure, please ask the user for more details.
-Focus on the most recent parts of the conversation primarily.
+请确保依靠工具来处理请求，不要自行编造回应。如果您不确定，请向用户询问更多细节。
+请主要关注对话中最新部分的内容。
 
-Agents:
+**可用智能体：**
 {self.agents}
 
-Current agent: {current_agent['active_agent']}
+**当前代理：**
+{current_agent['active_agent']}
 """
 
     # 检查不同A2A server状态
@@ -176,29 +178,34 @@ Current agent: {current_agent['active_agent']}
 
     # 发送信息
     async def send_message(
-        self, agent_name: str, message: str, tool_context: ToolContext
+        self, agent_name: str, message: str, tool_context: ToolContext, file_path: Optional[str] = None
     ):
-        """Sends a task either streaming (if supported) or non-streaming.
+        """向指定远程智能体发送消息和可选的文件附件。
 
-        This will send a message to the remote agent named agent_name.
+        此方法会向名为 agent_name 的远程智能体发送一个任务请求，支持流式（如果智能体支持）或非流式响应。
+        现在增加了文件传输功能，可以发送本地文件作为消息附件。
 
         Args:
-          agent_name: The name of the agent to send the task to.
-          message: The message to send to the agent for the task.
-          tool_context: The tool context this method runs in.
+          agent_name: 接收消息的远程智能体名称。
+          message: 要发送给智能体的文本消息内容。
+          tool_context: 该方法运行所在的工具上下文。
+          file_path: （可选）要附加的本地文件路径。如果提供，文件内容将被编码并随消息一起发送。
 
         Yields:
-          A dictionary of JSON data.
+          返回一个包含JSON数据的字典。
+        
+        Raises:
+          ValueError: 当指定的智能体不存在或客户端不可用时抛出。
         """
         # 前置验证
         if agent_name not in self.remote_agent_connections:
-            raise ValueError(f'Agent {agent_name} not found')
+            raise ValueError(f'{agent_name}没有找到')
         # 1. 获取当前状态
         state = tool_context.state
         state['agent'] = agent_name
         client = self.remote_agent_connections[agent_name]
         if not client:
-            raise ValueError(f'Client not available for {agent_name}')
+            raise ValueError(f'{agent_name}A2A客户端不可用')
         task_id = state.get('task_id', None)
         context_id = state.get('context_id', None)
         message_id = state.get('message_id', None)
@@ -214,9 +221,47 @@ Current agent: {current_agent['active_agent']}
             context_id=context_id,
             task_id=task_id,
         )
-        # 3. 发送信息
-        response = await client.send_message(request_message)
+        # 如果有要添加文件
+        if file_path and file_path.strip() != '': # 如果文件路径存在
+            with open(file_path, 'rb') as f: # 打开文件
+                file_content = base64.b64encode(f.read()).decode('utf-8') # 解码文件内容
+                file_name = os.path.basename(file_path) # 获取文件名
 
+            request_message.parts.append( # 将文件内容加入消息里面
+                Part( # 构建文件内容
+                    root=FilePart( # 创建文件内容
+                        file=FileWithBytes(name=file_name, bytes=file_content) # 文件内容
+                    )
+                )
+            )
+        
+        # 3. 发送信息，增加重试机制和异常处理
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                response = await client.send_message(request_message)
+                break  # 成功则跳出循环
+            except Exception as e:
+                retry_count += 1
+                if retry_count >= max_retries:
+                    # 最后的错误处理
+                    error_msg = f"与代理 {agent_name} 通信失败，已尝试 {max_retries} 次重试。错误详情: {str(e)}"
+                    print(f"----发送消息的时候出现了异常-----")
+                    print(error_msg)
+                    print(f"错误类型: {type(e).__name__}")
+                    import traceback
+                    traceback.print_exc()
+                    
+                    # 返回友好的错误信息而不是抛出异常
+                    return [f"很抱歉，与代理 {agent_name} 的通信出现故障，请稍后重试或联系管理员。"]
+                
+                # 等待一段时间再重试
+                wait_time = 2 ** retry_count  # 指数退避
+                print(f"与代理 {agent_name} 通信失败，第 {retry_count} 次重试前等待 {wait_time} 秒...")
+                await asyncio.sleep(wait_time)
+        
         # 4. 分析response
         # 4.1 message：转换格式后直接返回
         if isinstance(response, Message):
@@ -224,7 +269,7 @@ Current agent: {current_agent['active_agent']}
 
         # 4.2 task: 判断task状态
         task: Task = response
-        # Assume completion unless a state returns that isn't complete
+
         state['session_active'] = task.status.state not in [
             TaskState.completed,
             TaskState.canceled,
@@ -242,12 +287,11 @@ Current agent: {current_agent['active_agent']}
             tool_context.actions.escalate = True
         # 任务出错
         elif task.status.state == TaskState.canceled:
-            # Open question, should we return some info for cancellation instead
             return f"任务取消,请稍后再试"
-            # raise ValueError(f'Agent {agent_name} task {task.id} is canceled')
+           
         elif task.status.state == TaskState.failed:
             # Raise error for failure
-            raise ValueError(f'Agent {agent_name} task {task.id} failed')
+            raise ValueError(f'{agent_name} 任务 {task.id} 失败')
         response = []
         state['task_id'] = None
         if task.status.message:

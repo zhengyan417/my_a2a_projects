@@ -1,5 +1,10 @@
 import os
 import asyncio
+
+# 加载环境变量
+from dotenv import load_dotenv
+load_dotenv()
+
 from typing import Any
 
 from llama_index.core.output_parsers import PydanticOutputParser
@@ -15,10 +20,43 @@ from llama_index.core.workflow import (
 from llama_index.llms.dashscope import DashScope, DashScopeGenerationModels
 from pydantic import BaseModel, Field
 
-from RAG_query_engine import RAGQueryEngine
+try:
+    from .RAG_query_engine import RAGQueryEngine
+except ImportError:
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from RAG_query_engine import RAGQueryEngine
 
 import dotenv
 dotenv.load_dotenv()
+
+# 导入核心模块
+try:
+    # 尝试相对导入
+    from ..core import (
+        handle_exceptions,
+        retry_on_failure,
+        with_logging_context,
+        get_logger,
+        ModelCallError,
+        EnvironmentError,
+        InternalServerError
+    )
+except ImportError:
+    # 如果相对导入失败，使用绝对导入
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from core import (
+        handle_exceptions,
+        retry_on_failure,
+        with_logging_context,
+        get_logger,
+        ModelCallError,
+        EnvironmentError,
+        InternalServerError
+    )
 
 # 打印事件
 class LogEvent(Event):
@@ -61,12 +99,17 @@ class ChatResponse(BaseModel):
     )
     # 引用
     citations: list[Citation] = Field(
-        default=list,
+        default_factory=list,
         description='包含了多个引用的列表',
     )
 
+# 获取日志记录器
+logger = get_logger(__name__)
+
 # 工作流
 class DoctorRAGWorkflow(Workflow):
+    @handle_exceptions
+    @with_logging_context(component="doctor_rag", version="1.0")
     def __init__( # 初始化
         self,
         timeout: float | None = None, # 超时时间
@@ -74,16 +117,26 @@ class DoctorRAGWorkflow(Workflow):
         **workflow_kwargs: Any, # 其他参数
     ):
         super().__init__(timeout=timeout, verbose=verbose, **workflow_kwargs) # 父类初始化
+        
+        # 验证必要环境变量
+        dashscope_api_key = os.getenv('DASHSCOPE_API_KEY')
+        if not dashscope_api_key:
+            raise EnvironmentError("DASHSCOPE_API_KEY 环境变量未设置")
+            
         self._llm = DashScope(
             model_name=DashScopeGenerationModels.QWEN_MAX,
-            api_key=os.getenv('DASHSCOPE_API_KEY'),
+            api_key=dashscope_api_key,
         ) # 大语言模型
         
+        # 验证RAG引擎配置
+        llm_model_path = os.getenv('LLM_MODEL_PATH')
+        embed_model_path = os.getenv('EMBED_PATH')
+        storage_dir = os.getenv('STORAGE_DIR', './storage')
         
         self._rag_engine = RAGQueryEngine(
-            llm_model_path=os.getenv('LLM_MODEL_PATH'),
-            embed_model_path=os.getenv('EMBED_PATH'),
-            storage_dir=os.getenv('STORAGE_DIR'),
+            llm_model_path=llm_model_path,
+            embed_model_path=embed_model_path,
+            storage_dir=storage_dir,
             streaming=False,
             similarity_top_k=3,
             with_rerank=False,
@@ -125,40 +178,63 @@ class DoctorRAGWorkflow(Workflow):
         return ChatEvent(msg=ev.msg) # 返回聊天事件
 
     @step # 聊天
+    @handle_exceptions
+    @retry_on_failure(max_retries=2, exceptions=(ConnectionError, TimeoutError))
     async def chat(self, ctx: Context, event: ChatEvent) -> ChatResponseEvent:
-        ctx.write_event_to_stream(LogEvent(msg='正在查询医学知识库...')) # 推送事件
-        
-        # 使用RAG引擎查询
-        # response_text = self._rag_engine.query(event.msg)
-        contexts = self._rag_engine.query_with_contexts(event.msg)
-        
-        ctx.write_event_to_stream(LogEvent(msg='医学知识库查询完成')) # 推送事件
-
-        if contexts: # 如果有上下文
-            ctx.write_event_to_stream(LogEvent(msg='添加系统提示词...')) # 推送事件
-            prompt = self._system_prompt_template.format(context_str="\n\n".join(contexts)) # 获取系统提示
-            prompt += f"\n\nUSER: {event.msg}" # 添加用户提问
-        else: # 如果没有上下文
-            prompt = f"USER: {event.msg}\n\n请直接回答。" # 获取用户提问
-
-        response = await self._llm.acomplete(prompt) # 调用模型
-        raw_output = response.text.strip() # 获取模型输出
-
-        parser = PydanticOutputParser(ChatResponse)  # 创建解析器
         try:
-            response_obj: ChatResponse = parser.parse(raw_output) # 解析结构化输出
-        except ValueError as _: # 如果解析失败
-            response_obj = ChatResponse(response=raw_output) # 只返回消息即可
+            ctx.write_event_to_stream(LogEvent(msg='正在查询医学知识库...')) # 推送事件
+            logger.info(f"处理医学查询: {event.msg[:50]}...")
+            
+            # 使用RAG引擎查询
+            try:
+                # response_text = self._rag_engine.query(event.msg)
+                contexts = self._rag_engine.query_with_contexts(event.msg)
+            except Exception as e:
+                logger.warning(f"RAG查询失败，使用直接回答模式: {e}")
+                contexts = []
+            
+            ctx.write_event_to_stream(LogEvent(msg='医学知识库查询完成')) # 推送事件
 
-        citations = {} # 创建引用字典
-        if contexts and response_obj.citations: # 如果有上下文且有引用
-            for citation in response_obj.citations: # 遍历引用
-                citations[citation.citation_number] = citation.texts # 添加引用的内容
+            if contexts: # 如果有上下文
+                ctx.write_event_to_stream(LogEvent(msg='添加系统提示词...')) # 推送事件
+                prompt = self._system_prompt_template.format(context_str="\n\n".join(contexts)) # 获取系统提示
+                prompt += f"\n\nUSER: {event.msg}" # 添加用户提问
+                logger.debug(f"使用RAG上下文，共{len(contexts)}个相关段落")
+            else: # 如果没有上下文
+                prompt = f"USER: {event.msg}\n\n请直接回答。" # 获取用户提问
+                logger.debug("使用直接回答模式")
 
-        return ChatResponseEvent(
-            response=response_obj.response,
-            citations=citations
-        ) # 返回结果
+            # 调用大语言模型
+            try:
+                response = await self._llm.acomplete(prompt) # 调用模型
+                raw_output = response.text.strip() # 获取模型输出
+            except Exception as e:
+                raise ModelCallError(f"大语言模型调用失败: {str(e)}")
+
+            # 解析模型输出
+            parser = PydanticOutputParser(ChatResponse)  # 创建解析器
+            try:
+                response_obj: ChatResponse = parser.parse(raw_output) # 解析结构化输出
+            except ValueError as _: # 如果解析失败
+                response_obj = ChatResponse(response=raw_output) # 只返回消息即可
+
+            citations = {} # 创建引用字典
+            if contexts and response_obj.citations: # 如果有上下文且有引用
+                for citation in response_obj.citations: # 遍历引用
+                    citations[citation.citation_number] = citation.texts # 添加引用的内容
+
+            logger.info(f"医学查询响应生成成功，引用数量: {len(citations)})")
+            return ChatResponseEvent(
+                response=response_obj.response,
+                citations=citations
+            ) # 返回结果
+            
+        except ModelCallError:
+            # 重新抛出自定义异常
+            raise
+        except Exception as e:
+            logger.error(f"医学查询处理过程中发生未知错误: {e}", exc_info=True)
+            raise InternalServerError(f"医学查询处理失败: {str(e)}")
 
 
 async def main():

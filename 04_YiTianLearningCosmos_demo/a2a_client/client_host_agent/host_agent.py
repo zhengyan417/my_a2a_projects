@@ -124,7 +124,7 @@ class HostAgent:
 
     def root_instruction(self, context: ReadonlyContext) -> str:
         current_agent = self.check_state(context)
-        return f"""您是一位擅长将用户请求分派给相应远程代理的专家。
+        return f"""您是一位擅长将用户请求分派给相应远程智能体的专家。
 
 **发现：**
 - 您可以使用 `list_remote_agents` 来列出可用的远程智能体，以便将任务分派给它们。
@@ -140,7 +140,7 @@ class HostAgent:
 **可用智能体：**
 {self.agents}
 
-**当前代理：**
+**当前智能体：**
 {current_agent['active_agent']}
 """
 
